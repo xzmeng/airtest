@@ -303,7 +303,7 @@ Warming up for 5s...
 ```
 $ python3 cpu_throttle_test.py --workload sha256
  
- Workers: 10 | Bucket: 10s | Warm-up: 5s | Duration: 45:00 | Baseline buckets: 3
+Workers: 10 | Bucket: 10s | Warm-up: 5s | Duration: 45:00 | Baseline buckets: 3
 Starting workers...
 Warming up for 5s...
 
@@ -380,8 +380,8 @@ Warming up for 5s...
 ### 测试环境: 室温26摄氏度，量化回测负载
 ```
 $ python3 cpu_throttle_test.py
-  ```
-  Workers: 10 | Workload: backtest | Bucket: 10s | Warm-up: 5s | Duration: 45:00 | Baseline buckets: 3
+
+Workers: 10 | Workload: backtest | Bucket: 10s | Warm-up: 5s | Duration: 45:00 | Baseline buckets: 3
 Backtest: 6 symbols | 8,000 bars | 4 parameter sets per run
 Starting workers...
 Warming up for 5s...
