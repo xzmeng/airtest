@@ -1,6 +1,8 @@
 # MacBook Air CPU sustained-load test
 
-这个目录里的 `cpu_throttle_test.py` 用来测试 MacBook Air 在 CPU 长时间满载时的性能曲线。它会启动多个 Python 进程持续做 SHA256 计算，并按固定时间窗口输出吞吐量。
+这个目录里的 `cpu_throttle_test.py` 用来测试 MacBook Air 在 CPU 长时间满载时的性能曲线。它会启动多个 Python 进程持续运行 CPU 密集型负载，并按固定时间窗口输出吞吐量。
+
+默认负载是一个纯 Python 的量化回测模拟：每个 worker 会生成确定性的多标的价格序列，然后反复执行指标计算、参数扫描、仓位切换、手续费/滑点和 PnL 计算。这个负载比单纯 SHA256 更接近真实量化回测里的浮点循环、分支判断和策略参数扫描，同时仍然能把 CPU 压满。
 
 重点看的是：随着时间推移，同样长度的时间窗口里还能完成多少计算。如果吞吐量持续下降，通常就说明机器开始进入热限制或降频区间。
 
@@ -20,6 +22,8 @@ python3 cpu_throttle_test.py
 预热时间: 5 秒
 worker 数量: 当前机器逻辑 CPU 数
 baseline: 前 3 个采样窗口的平均吞吐量
+默认负载: backtest
+回测规模: 6 个标的 x 8,000 根 bar x 4 组参数
 ```
 
 推荐插电运行，并关闭低电量模式。测试时尽量不要同时跑其他重负载任务。
@@ -29,17 +33,18 @@ baseline: 前 3 个采样窗口的平均吞吐量
 示例：
 
 ```text
-Workers: 10 | Bucket: 10s | Warm-up: 5s | Duration: 45:00 | Baseline buckets: 3
+Workers: 10 | Workload: backtest | Bucket: 10s | Warm-up: 5s | Duration: 45:00 | Baseline buckets: 3
+Backtest: 6 symbols | 8,000 bars | 4 parameter sets per run
 Starting workers...
 Warming up for 5s...
 
-   #  Elapsed       Hashes       Rate/s   Relative   Status   OK
+   #  Elapsed         Runs       Rate/s   Relative   Status   OK
 ----------------------------------------------------------------------------
-   1    00:10       28,420      2,842.0      99.8%     peak  yes
-   2    00:20       28,510      2,851.0     100.1%     peak  yes
-   3    00:30       28,550      2,855.0     100.2%     peak  yes
-   4    00:40       27,100      2,710.0      95.1%     peak  yes
-   5    00:50       25,600      2,560.0      89.8%     drop  yes
+   1    00:10          124         12.4      99.8%     peak  yes
+   2    00:20          125         12.5     100.6%     peak  yes
+   3    00:30          123         12.3      99.0%     peak  yes
+   4    00:40          117         11.7      94.2%    watch  yes
+   5    00:50          111         11.1      89.3%     drop  yes
 ```
 
 字段说明：
@@ -47,8 +52,8 @@ Warming up for 5s...
 ```text
 #          第几个采样窗口
 Elapsed    正式测试开始后的已运行时间，不包含 warm-up
-Hashes     这个窗口里完成的 SHA256 次数
-Rate/s     每秒完成的 SHA256 次数
+Runs       这个窗口里完成的回测模拟次数；SHA256 模式下显示为 Hashes
+Rate/s     每秒完成的负载次数
 Relative   相对 baseline 的性能百分比
 Status     peak / watch / drop
 OK         是否收齐了所有 worker 的该窗口数据
@@ -100,6 +105,18 @@ python3 cpu_throttle_test.py --warmup 3
 
 ```bash
 python3 cpu_throttle_test.py --workers 8
+```
+
+加大回测规模，让每次 run 更重：
+
+```bash
+python3 cpu_throttle_test.py --symbols 12 --bars 20000 --parameter-sets 8
+```
+
+改回旧的 SHA256 负载：
+
+```bash
+python3 cpu_throttle_test.py --workload sha256 --data-mib 1
 ```
 
 把结果保存成 CSV：
@@ -155,9 +172,11 @@ sudo powermetrics --samplers cpu_power,thermal -i 5000 -o ~/Desktop/mba_thermal.
 
 ## 实测
 
-### 测试环境: 室温31摄氏度
+下面是历史 SHA256 负载的实测记录。切到默认 backtest 负载后，绝对吞吐量不能和这些历史数据直接比较，但 `Relative` 和 `Status` 的判断方式相同。
+
+### 测试环境: 室温31摄氏度，SHA256 负载
 ```
-$ python3 cpu_throttle_test.py
+$ python3 cpu_throttle_test.py --workload sha256
 
 Workers: 10 | Bucket: 10s | Warm-up: 5s | Duration: 45:00 | Baseline buckets: 3
 Starting workers...
@@ -280,9 +299,9 @@ Warming up for 5s...
  113    18:50      176,954     17,695.4     80.8%     drop  yes
  ```
 
-### 测试环境: 室温26摄氏度
+### 测试环境: 室温26摄氏度，SHA256 负载
 ```
-$ python3 cpu_throttle_test.py
+$ python3 cpu_throttle_test.py --workload sha256
  
  Workers: 10 | Bucket: 10s | Warm-up: 5s | Duration: 45:00 | Baseline buckets: 3
 Starting workers...
@@ -356,4 +375,100 @@ Warming up for 5s...
   64    10:40      222,516     22,251.6     89.5%     drop  yes
   65    10:50      225,872     22,587.2     90.8%    watch  yes
   66    11:00      224,163     22,416.3     90.1%    watch  yes
+  ```
+
+### 测试环境: 室温26摄氏度，量化回测负载
+```
+$ python3 cpu_throttle_test.py
+  ```
+  Workers: 10 | Workload: backtest | Bucket: 10s | Warm-up: 5s | Duration: 45:00 | Baseline buckets: 3
+Backtest: 6 symbols | 8,000 bars | 4 parameter sets per run
+Starting workers...
+Warming up for 5s...
+
+   #  Elapsed         Runs       Rate/s   Relative   Status   OK
+----------------------------------------------------------------------------
+   1    00:10        1,086        108.6    103.0%     peak  yes
+   2    00:20        1,052        105.2     99.8%     peak  yes
+   3    00:30        1,025        102.5     97.2%     peak  yes
+   4    00:40        1,015        101.5     96.3%     peak  yes
+   5    00:50        1,002        100.2     95.0%     peak  yes
+   6    01:00          973         97.3     92.3%    watch  yes
+   7    01:10          980         98.0     92.9%    watch  yes
+   8    01:20          973         97.3     92.3%    watch  yes
+   9    01:30          957         95.7     90.8%    watch  yes
+  10    01:40          986         98.6     93.5%    watch  yes
+  11    01:50          948         94.8     89.9%     drop  yes
+  12    02:00        1,004        100.4     95.2%     peak  yes
+  13    02:10          973         97.3     92.3%    watch  yes
+  14    02:20          925         92.5     87.7%     drop  yes
+  15    02:30          918         91.8     87.1%     drop  yes
+  16    02:40          889         88.9     84.3%     drop  yes
+  17    02:50          863         86.3     81.9%     drop  yes
+  18    03:00          865         86.5     82.0%     drop  yes
+  19    03:10          817         81.7     77.5%     drop  yes
+  20    03:20          844         84.4     80.1%     drop  yes
+  21    03:30          849         84.9     80.5%     drop  yes
+  22    03:40          842         84.2     79.9%     drop  yes
+  23    03:50          851         85.1     80.7%     drop  yes
+  24    04:00          845         84.5     80.1%     drop  yes
+  25    04:10          851         85.1     80.7%     drop  yes
+  26    04:20          862         86.2     81.8%     drop  yes
+  27    04:30          861         86.1     81.7%     drop  yes
+  28    04:40          870         87.0     82.5%     drop  yes
+  29    04:50          868         86.8     82.3%     drop  yes
+  30    05:00          870         87.0     82.5%     drop  yes
+  31    05:10          868         86.8     82.3%     drop  yes
+  32    05:20          868         86.8     82.3%     drop  yes
+  33    05:30          835         83.5     79.2%     drop  yes
+  34    05:40          870         87.0     82.5%     drop  yes
+  35    05:50          869         86.9     82.4%     drop  yes
+  36    06:00          860         86.0     81.6%     drop  yes
+  37    06:10          864         86.4     81.9%     drop  yes
+  38    06:20          864         86.4     81.9%     drop  yes
+  39    06:30          835         83.5     79.2%     drop  yes
+  40    06:40          860         86.0     81.6%     drop  yes
+  41    06:50          871         87.1     82.6%     drop  yes
+  42    07:00          863         86.3     81.9%     drop  yes
+  43    07:10          866         86.6     82.1%     drop  yes
+  44    07:20          867         86.7     82.2%     drop  yes
+  45    07:30          807         80.7     76.5%     drop  yes
+  46    07:40          849         84.9     80.5%     drop  yes
+  47    07:50          865         86.5     82.0%     drop  yes
+  48    08:00          847         84.7     80.3%     drop  yes
+  49    08:10          800         80.0     75.9%     drop  yes
+  50    08:20          820         82.0     77.8%     drop  yes
+  51    08:30          838         83.8     79.5%     drop  yes
+  52    08:40          813         81.3     77.1%     drop  yes
+  53    08:50          849         84.9     80.5%     drop  yes
+  54    09:00          834         83.4     79.1%     drop  yes
+  55    09:10          824         82.4     78.2%     drop  yes
+  56    09:20          840         84.0     79.7%     drop  yes
+  57    09:30          853         85.3     80.9%     drop  yes
+  58    09:40          850         85.0     80.6%     drop  yes
+  59    09:50          848         84.8     80.4%     drop  yes
+  60    10:00          854         85.4     81.0%     drop  yes
+  61    10:10          847         84.7     80.3%     drop  yes
+  62    10:20          852         85.2     80.8%     drop  yes
+  63    10:30          850         85.0     80.6%     drop  yes
+  64    10:40          854         85.4     81.0%     drop  yes
+  65    10:50          856         85.6     81.2%     drop  yes
+  66    11:00          858         85.8     81.4%     drop  yes
+  67    11:10          860         86.0     81.6%     drop  yes
+  68    11:20          852         85.2     80.8%     drop  yes
+  69    11:30          836         83.6     79.3%     drop  yes
+  70    11:40          850         85.0     80.6%     drop  yes
+  71    11:50          745         74.5     70.7%     drop  yes
+  72    12:00          755         75.5     71.6%     drop  yes
+  73    12:10          763         76.3     72.4%     drop  yes
+  74    12:20          797         79.7     75.6%     drop  yes
+  75    12:30          834         83.4     79.1%     drop  yes
+  76    12:40          858         85.8     81.4%     drop  yes
+  77    12:50          828         82.8     78.5%     drop  yes
+  78    13:00          850         85.0     80.6%     drop  yes
+  79    13:10          831         83.1     78.8%     drop  yes
+  80    13:20          847         84.7     80.3%     drop  yes
+  81    13:30          846         84.6     80.2%     drop  yes
+  82    13:40          856         85.6     81.2%     drop  yes
+  83    13:50          854         85.4     81.0%     drop  yes
   ```
